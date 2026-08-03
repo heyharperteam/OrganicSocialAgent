@@ -216,14 +216,10 @@ async def _fetch_post_metrics(client: httpx.AsyncClient, m: dict) -> PostPerform
     is_reel = product_type == "REELS"
     is_story = product_type == "STORY"
 
-    # Fan out: base metrics + follower breakdown always; type-specific when applicable
+    # Fan out: base metrics always; type-specific when applicable.
+    # Note: follow_type breakdown is only supported on account-level reach, not per-post.
     tasks = [
         _get(client, f"/{m['id']}/insights", {"metric": ",".join(_MEDIA_METRICS)}),
-        _get(client, f"/{m['id']}/insights", {
-            "metric": "reach",
-            "breakdown": "follow_type",
-            "metric_type": "total_value",
-        }),
     ]
     if is_reel:
         tasks.append(_get(client, f"/{m['id']}/insights", {
@@ -249,22 +245,16 @@ async def _fetch_post_metrics(client: httpx.AsyncClient, m: dict) -> PostPerform
         elif name == "total_interactions":
             post.total_interactions = int(val)
 
-    # Follower breakdown
-    bd = results[1] if not isinstance(results[1], Exception) else None
-    post.reach_follower, post.reach_non_follower = _parse_follower_breakdown(bd)
-    if not post.reach_follower and not post.reach_non_follower:
-        logger.debug("follower breakdown empty for {} — raw: {!r}", m["id"], bd)
-
     # Type-specific
-    if len(results) > 2 and not isinstance(results[2], Exception):
-        extras = _parse_insights_values(results[2])
+    if len(results) > 1 and not isinstance(results[1], Exception):
+        extras = _parse_insights_values(results[1])
         if is_reel:
             post.avg_watch_time_ms = int(extras.get("ig_reels_avg_watch_time", 0))
             skip_rate = extras.get("reels_skip_rate")
             if skip_rate is not None:
                 post.completion_rate = max(0.0, min(1.0 - float(skip_rate), 1.0))
             if not post.avg_watch_time_ms and skip_rate is None:
-                logger.debug("reel metrics empty for {} — raw: {!r}", m["id"], results[2])
+                logger.debug("reel metrics empty for {} — raw: {!r}", m["id"], results[1])
         elif is_story:
             post.impressions = int(extras.get("impressions", 0))
             post.taps_forward = int(extras.get("taps_forward", 0))
@@ -272,9 +262,9 @@ async def _fetch_post_metrics(client: httpx.AsyncClient, m: dict) -> PostPerform
             post.exits = int(extras.get("exits", 0))
             post.story_replies = int(extras.get("replies", 0))
             if not post.impressions:
-                logger.debug("story metrics empty for {} — raw: {!r}", m["id"], results[2])
-    elif len(results) > 2 and isinstance(results[2], Exception):
-        logger.warning("type-specific metrics failed for {}: {!r}", m["id"], results[2])
+                logger.debug("story metrics empty for {} — raw: {!r}", m["id"], results[1])
+    elif len(results) > 1 and isinstance(results[1], Exception):
+        logger.warning("type-specific metrics failed for {}: {!r}", m["id"], results[1])
 
     return post
 
@@ -371,14 +361,14 @@ async def fetch_audience_demographics() -> AudienceDemographics:
     async with httpx.AsyncClient(timeout=30.0) as client:
         gender_age, countries, cities = await asyncio.gather(
             _get(client, f"/{settings.meta_ig_user_id}/insights",
-                 {"metric": "engaged_audience_demographics", "period": "lifetime",
-                  "timeframe": "last_90_days", "breakdown": "age,gender"}),
+                 {"metric": "engaged_audience_demographics", "metric_type": "total_value",
+                  "period": "lifetime", "timeframe": "last_90_days", "breakdown": "age,gender"}),
             _get(client, f"/{settings.meta_ig_user_id}/insights",
-                 {"metric": "reached_audience_demographics", "period": "lifetime",
-                  "timeframe": "last_90_days", "breakdown": "country"}),
+                 {"metric": "reached_audience_demographics", "metric_type": "total_value",
+                  "period": "lifetime", "timeframe": "last_90_days", "breakdown": "country"}),
             _get(client, f"/{settings.meta_ig_user_id}/insights",
-                 {"metric": "reached_audience_demographics", "period": "lifetime",
-                  "timeframe": "last_90_days", "breakdown": "city"}),
+                 {"metric": "reached_audience_demographics", "metric_type": "total_value",
+                  "period": "lifetime", "timeframe": "last_90_days", "breakdown": "city"}),
             return_exceptions=True,
         )
 
