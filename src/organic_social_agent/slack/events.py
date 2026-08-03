@@ -449,17 +449,19 @@ async def _handle_mention(event: dict) -> None:
             return
 
         oldest = await oldest_since()
-        max_days = (date.today() - oldest).days if oldest else None
+        db_days = (date.today() - oldest).days if oldest else 0
+        effective_cap = max(90, db_days)
 
         if is_all:
-            post_days = max_days if max_days else 90
-        elif max_days is not None and post_days > max_days:
+            post_days = effective_cap
+        elif post_days > effective_cap:
             await _post_message(
                 channel,
                 (
-                    f"We only have *{max_days} days* of data on record. "
-                    f"Please specify a shorter window (e.g. _last {max_days} days_) "
-                    f"or say _using all available data_ to use the full {max_days} days."
+                    f"The furthest back we can go is *{effective_cap} days* "
+                    f"({'Meta API limit' if effective_cap == 90 else 'based on stored history'}). "
+                    f"Please specify a shorter window (e.g. _last {effective_cap} days_) "
+                    f"or say _using all available data_ to use the full {effective_cap} days."
                 ),
                 thread_ts=thread_ts,
             )
