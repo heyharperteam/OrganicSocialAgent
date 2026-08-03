@@ -177,22 +177,24 @@ async def handle_social(form: dict) -> dict:
         from datetime import date as _date
 
         oldest = await oldest_since()
-        max_days = (_date.today() - oldest).days if oldest else None
+        db_days = (_date.today() - oldest).days if oldest else 0
+        effective_cap = max(90, db_days)
 
         if is_all:
-            post_days = max_days if max_days else 90
+            post_days = effective_cap
             topic = _DAYS_RE.sub("", _ALL_DATA_RE.sub("", rest)).strip()
             days_label = f"all available data ({post_days} days)"
         else:
             post_days = int(days_match.group(1))
             topic = _DAYS_RE.sub("", rest).strip()
-            if max_days is not None and post_days > max_days:
+            if post_days > effective_cap:
+                limit_reason = "Meta API limit" if effective_cap == 90 else "stored history"
                 return {
                     "response_type": "ephemeral",
                     "text": (
-                        f"We only have *{max_days} days* of data on record. "
-                        f"Please use `--days {max_days}` or less, "
-                        f"or `--days all` to use the full history."
+                        f"The furthest back we can go is *{effective_cap} days* ({limit_reason}). "
+                        f"Please use `--days {effective_cap}` or less, "
+                        f"or `--days all` to use the full {effective_cap} days."
                     ),
                 }
             days_label = f"last {post_days} days"
