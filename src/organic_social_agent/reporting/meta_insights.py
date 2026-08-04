@@ -222,10 +222,8 @@ async def _fetch_post_metrics(client: httpx.AsyncClient, m: dict) -> PostPerform
         _get(client, f"/{m['id']}/insights", {"metric": ",".join(_MEDIA_METRICS)}),
     ]
     if is_reel:
-        tasks.append(_get(client, f"/{m['id']}/insights", {
-            "metric": _REEL_METRICS,
-            "metric_type": "total_value",
-        }))
+        # Reel retention metrics use the standard values[] format — no metric_type needed
+        tasks.append(_get(client, f"/{m['id']}/insights", {"metric": _REEL_METRICS}))
     elif is_story:
         tasks.append(_get(client, f"/{m['id']}/insights", {"metric": _STORY_METRICS}))
 
@@ -251,10 +249,14 @@ async def _fetch_post_metrics(client: httpx.AsyncClient, m: dict) -> PostPerform
         if is_reel:
             post.avg_watch_time_ms = int(extras.get("ig_reels_avg_watch_time", 0))
             skip_rate = extras.get("reels_skip_rate")
+            logger.debug("reel metrics for {} — avg_watch_time={} skip_rate={!r} raw: {!r}",
+                         m["id"], post.avg_watch_time_ms, skip_rate, results[1])
             if skip_rate is not None:
-                post.completion_rate = max(0.0, min(1.0 - float(skip_rate), 1.0))
-            if not post.avg_watch_time_ms and skip_rate is None:
-                logger.debug("reel metrics empty for {} — raw: {!r}", m["id"], results[1])
+                # API returns skip_rate as a ratio (0–1) or percentage (0–100); normalise to ratio
+                sr = float(skip_rate)
+                if sr > 1.0:
+                    sr /= 100.0
+                post.completion_rate = max(0.0, min(1.0 - sr, 1.0))
         elif is_story:
             post.impressions = int(extras.get("impressions", 0))
             post.taps_forward = int(extras.get("taps_forward", 0))
