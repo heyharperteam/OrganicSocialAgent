@@ -10,7 +10,6 @@ Schedule (runtime-config defaults, will move to Postgres config table):
 
 from __future__ import annotations
 
-import asyncio
 from datetime import UTC, date, datetime, timedelta
 
 import truststore
@@ -36,16 +35,16 @@ async def _run_report(label: str, since: date, until: date, channel_id: str | No
         logger.error("scheduled {} report failed: {!r}", label, exc)
 
 
-def _weekly() -> None:
+async def _weekly() -> None:
     until = date.today()
     since = until - timedelta(days=7)
-    asyncio.create_task(_run_report("Weekly", since, until))
+    await _run_report("Weekly", since, until)
 
 
-def _monthly() -> None:
+async def _monthly() -> None:
     until = date.today()
     since = until - timedelta(days=30)
-    asyncio.create_task(_run_report("Monthly", since, until))
+    await _run_report("Monthly", since, until)
 
 
 async def _run_daily_snapshot() -> None:
@@ -83,14 +82,6 @@ async def _run_weekly_post_snapshot() -> None:
         await save_post_snapshot(posts, snapshot_week)
     except Exception as exc:
         logger.error("weekly post snapshot failed: {!r}", exc)
-
-
-def _daily() -> None:
-    asyncio.create_task(_run_daily_snapshot())
-
-
-def _weekly_snapshot() -> None:
-    asyncio.create_task(_run_weekly_post_snapshot())
 
 
 _TYPE_LABEL = {"IMAGE": "Photo", "VIDEO": "Video", "CAROUSEL_ALBUM": "Carousel"}
@@ -181,20 +172,21 @@ async def _run_daily_mentions(channel_id: str | None = None) -> None:
         logger.error("daily mentions Slack post failed: {}", exc.response.get("error"))
 
 
-def _daily_mentions() -> None:
-    asyncio.create_task(_run_daily_mentions())
-
-
 def start_scheduler() -> None:
+    # Every job below must be a coroutine function. AsyncIOScheduler awaits those
+    # on the event loop, but hands plain functions to a worker thread — where
+    # asyncio.create_task() raises "no running event loop" and the job silently
+    # never runs. That bug ate every scheduled run before v0.20.
     _scheduler.add_job(_weekly, CronTrigger(day_of_week="mon", hour=9, minute=0, timezone="UTC"),
                        id="weekly_report", replace_existing=True)
     _scheduler.add_job(_monthly, CronTrigger(day=1, hour=9, minute=0, timezone="UTC"),
                        id="monthly_report", replace_existing=True)
-    _scheduler.add_job(_daily, CronTrigger(hour=8, minute=0, timezone="UTC"),
+    _scheduler.add_job(_run_daily_snapshot, CronTrigger(hour=8, minute=0, timezone="UTC"),
                        id="daily_snapshot", replace_existing=True)
-    _scheduler.add_job(_weekly_snapshot, CronTrigger(day_of_week="mon", hour=8, minute=0, timezone="UTC"),
+    _scheduler.add_job(_run_weekly_post_snapshot,
+                       CronTrigger(day_of_week="mon", hour=8, minute=0, timezone="UTC"),
                        id="weekly_post_snapshot", replace_existing=True)
-    _scheduler.add_job(_daily_mentions, CronTrigger(hour=9, minute=0, timezone="UTC"),
+    _scheduler.add_job(_run_daily_mentions, CronTrigger(hour=9, minute=0, timezone="UTC"),
                        id="daily_mentions", replace_existing=True)
     _scheduler.start()
     logger.info(
