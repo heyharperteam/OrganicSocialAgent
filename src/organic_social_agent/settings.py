@@ -1,5 +1,6 @@
 """Central config, loaded from .env via pydantic-settings (PPB pattern)."""
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _ENV_FILE = ".env"
@@ -55,10 +56,22 @@ class Settings(BaseSettings):
     competitor_ig_handles: str = "gorjana,kinsleyarmelle,caitlynminimalist,puravidabracelets,mejuri"
 
     # ── Slack ──
+    # The two channel IDs accept either spelling: the local .env uses
+    # SLACK_CHANNEL_ID / SLACK_STRATEGY_CHANNEL_ID, Railway uses
+    # SLACK_CHANNEL_REPORTING_ID / SLACK_CHANNEL_STRATEGY_ID. They silently
+    # resolved to "" in production before v0.21, which killed every scheduled
+    # Slack post ("Slack not configured") while slash commands kept working —
+    # those read the channel from the request payload instead.
     slack_bot_token: str = ""
     slack_signing_secret: str = ""
-    slack_channel_id: str = ""             # #social-media-reporting (automated drops)
-    slack_strategy_channel_id: str = ""    # #social-media-strategy (prompt-driven Q&A)
+    slack_channel_id: str = Field(           # #social-media-reporting (automated drops)
+        "",
+        validation_alias=AliasChoices("slack_channel_id", "slack_channel_reporting_id"),
+    )
+    slack_strategy_channel_id: str = Field(  # #social-media-strategy (prompt-driven Q&A)
+        "",
+        validation_alias=AliasChoices("slack_strategy_channel_id", "slack_channel_strategy_id"),
+    )
 
     # ── Library indexing (vision pass tuning — dev-side cost/quality knobs,
     #    NOT client config: see progress.md "Config convention") ──
